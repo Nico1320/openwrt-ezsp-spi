@@ -1,0 +1,219 @@
+#!/bin/sh
+# Flash an EmberZNet NCP image to the EM3581 over SPI.
+#
+#   ezsp-spi-flash <image.ebl>
+#
+# Wraps Silicon Labs' own transfer code, which ships inside the Linksys
+# firmware as TestNCP_SPI. That binary is proprietary and is NOT distributed
+# here: extract it from a WHW03 firmware image yourself and place the result at
+# $TARBALL (see "Preparing the vendor tarball" below).
+#
+# Why the vendor binary rather than our own flasher: it is Silicon Labs' EBL
+# transfer implementation and it works. Reimplementing XMODEM-over-SPI is a
+# real project whose failure mode is a half-written flash, so until that exists
+# and is proven, this uses what works.
+#
+# Requirements:
+#   * a device tree WITHOUT cs-gpios on the SPI controller -- the vendor binary
+#     drives chip select itself through /sys/class/gpio/gpio45. With the kernel
+#     owning that pin it hangs at "Starting bootloader communications".
+#   * the ezsp-spi service stopped, which this handles.
+#
+# Recovery: the standalone bootloader lives in its own flash region that an
+# application image cannot write, and it runs before the app on every reset,
+# checking nWAKE. A failed or interrupted transfer leaves it able to retry, so
+# reflashing a known-good image always works. Keep one in $FWDIR.
+
+set -e
+
+BIN=/usr/sbin/ezsp-spi
+ROOT=/tmp/zbroot
+TARBALL=/root/zbroot.tar.gz
+FWDIR=/root/ncp-fw
+IMAGE="$1"
+
+usage() {
+	cat <<EOF
+usage: ezsp-spi-flash <image.ebl>
+
+Images kept in $FWDIR:
+$(ls -1 "$FWDIR"/*.ebl 2>/dev/null | sed 's/^/  /' || echo "  (none)")
+
+Preparing the vendor tarball (once, on a build host):
+  extract a WHW03 firmware image, then from inside its rootfs:
+    tar czf zbroot.tar.gz lib usr/lib bin/busybox bin/sh \\
+        usr/sbin/TestNCP_SPI usr/sbin/zbbootloader.sh usr/sbin/devmem2
+  (devmem2 is vestigial: the binary shells out to it to pin-mux gpio45, but
+   this script already exports gpio45 via sysfs, and CONFIG_KERNEL_DEVMEM is
+   off so /dev/mem does not exist. It fails harmlessly. Kept for tarball
+   compatibility.)
+  copy it to $TARBALL
+EOF
+	exit 1
+}
+
+[ -n "$IMAGE" ] || usage
+[ -f "$IMAGE" ] || { echo "no such image: $IMAGE" >&2; exit 1; }
+[ -f "$TARBALL" ] || { echo "missing $TARBALL -- see 'ezsp-spi-flash' with no arguments" >&2; exit 1; }
+
+# Set once the router service has been stopped, so the exit trap knows it owes
+# the node a restart. Bailing out early used to leave it off the mesh.
+STOPPED_SERVICE=0
+
+teardown() {
+	for M in "$ROOT/sys/class/gpio" "$ROOT/sys" "$ROOT/proc" "$ROOT/dev"; do
+		grep -q " $M " /proc/mounts 2>/dev/null || continue
+		umount "$M" 2>/dev/null || umount -l "$M" 2>/dev/null
+	done
+	sleep 1
+
+	# Never delete the tree while a bind is still standing: rm follows bind
+	# mounts, and /dev is bind mounted in here.
+	if grep -qE " $ROOT/(dev|proc|sys)" /proc/mounts 2>/dev/null; then
+		echo "warning: still mounted under $ROOT, not removing" >&2
+	else
+		rm -rf "$ROOT"
+	fi
+
+	# Covers both revisions: V2 uses 541/543, V1 uses 568/567.
+	for g in 541 543 557 561 562 567 568; do
+		echo $g > /sys/class/gpio/unexport 2>/dev/null || true
+	done
+
+	[ "$STOPPED_SERVICE" = 1 ] && {
+		echo "==> restarting the router service"
+		/etc/init.d/ezsp-spi start >/dev/null 2>&1 || true
+	}
+	return 0
+}
+trap 'teardown' EXIT INT TERM
+
+echo "==> stopping the router service (it holds the radio)"
+/etc/init.d/ezsp-spi stop >/dev/null 2>&1 || true
+STOPPED_SERVICE=1
+sleep 1
+
+echo "==> checking the image is built for this chip"
+"$BIN" verify "$IMAGE" || {
+	echo "refusing to flash an image that does not match this chip" >&2
+	exit 1
+}
+
+echo "==> preparing the vendor environment"
+mkdir -p "$ROOT"
+cd "$ROOT"
+[ -f usr/sbin/TestNCP_SPI ] || tar xzf "$TARBALL"
+chmod +x usr/sbin/TestNCP_SPI usr/sbin/zbbootloader.sh usr/sbin/devmem2 \
+	 bin/busybox lib/ld-uClibc*.so* 2>/dev/null || true
+mkdir -p dev proc sys usr/bin sbin tmp/Belkin_settings "$ROOT/usr/sbin/ncp-fw"
+
+# The vendor busybox is uClibc linked and can run in here; the host's musl one
+# cannot, and without a working shell the binary's syscfg call silently fails
+# and it falls back to the V1 pin map.
+for a in sh sleep echo cat ls grep sed; do ln -sf busybox "bin/$a"; done
+
+grep -q " $ROOT/dev "  /proc/mounts || mount -o bind /dev  dev
+grep -q " $ROOT/proc " /proc/mounts || mount -o bind /proc proc
+grep -q " $ROOT/sys "  /proc/mounts || mount -o bind /sys  sys
+
+# The vendor binary picks its pin table from syscfg, so the hardware revision
+# has to be reported truthfully: V1 and V2 wire nWAKE and the line the vendor
+# calls nCS to different pins, and getting it wrong drives the wrong lines
+# during bootloader entry.
+#
+# "nCS" is the vendor binary's name for it and it is not the chip select --
+# spiCS (gpio45) is. On the V1 that pin is the eMMC's, which is why only this
+# script ever drives it, and only inside the vendor's own transfer.
+#
+#            nRESET  nWAKE  nHOST_INT  "nCS"  spiCS
+#   V1         49      55       50       56     45
+#   V2         49      31       50       29     45
+BOARD="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+case "$BOARD" in
+*whw03v2*)  HW=2; WAKE=31; NCS=29 ;;
+*whw03*)    HW=1; WAKE=55; NCS=56 ;;
+*)
+	echo "unrecognised board '$BOARD' -- this script only knows the WHW03" >&2
+	exit 1
+	;;
+esac
+echo "==> board $BOARD (hardware revision $HW): nWAKE=$WAKE nCS=$NCS"
+[ "$HW" = 1 ] && echo "    note: the V1 pin map comes from the vendor binary and is UNTESTED"
+
+printf '#!/bin/sh\n[ "$2" = "device::hw_revision" ] && echo %s\nexit 0\n' "$HW" > sbin/syscfg
+chmod +x sbin/syscfg
+
+# sysfs numbering is the line offset plus 512.
+S_WAKE=$((WAKE + 512))
+S_NCS=$((NCS + 512))
+
+# 557 is pin 45, the chip select the vendor binary drives itself.
+#
+# A failed export has to be loud. A gpio-hog in the device tree holds the line
+# and makes export return EBUSY, and since the symlinks below are created
+# regardless, the vendor binary would otherwise just fail to open a dangling
+# path deep inside the transfer. The hog is V1-only: qcom-ipq4019-whw03.dts
+# hogs gpio29 (eMMC there), the shared .dtsi does not, so on a V2 gpio29 is
+# free and exports fine. That is required -- NCP flashing needs it.
+for g in $S_NCS $S_WAKE 557 561 562; do
+	[ -d "/sys/class/gpio/gpio$g" ] && continue
+	echo $g > /sys/class/gpio/export 2>/dev/null || true
+	[ -d "/sys/class/gpio/gpio$g" ] || {
+		echo "cannot export gpio$g (line $((g - 512)))." >&2
+		echo "Something else owns it -- most likely a gpio-hog in the" >&2
+		echo "device tree. Check the zigbee nodes in" >&2
+		echo "qcom-ipq4019-whw03.dts (V1 hog) and .dtsi (shared)." >&2
+		exit 1
+	}
+done
+echo out > /sys/class/gpio/gpio557/direction 2>/dev/null || true
+echo 1   > /sys/class/gpio/gpio557/value 2>/dev/null || true
+
+grep -q " $ROOT/sys/class/gpio " /proc/mounts || mount -t tmpfs none "$ROOT/sys/class/gpio"
+cd "$ROOT/sys/class/gpio"
+P=../../devices/platform/soc/1000000.pinctrl/gpiochip0/gpio
+ln -sf $P/gpio$S_NCS  "gpio$NCS"
+ln -sf $P/gpio$S_WAKE "gpio$WAKE"
+ln -sf $P/gpio557 gpio45
+ln -sf $P/gpio561 gpio49
+ln -sf $P/gpio562 gpio50
+cd "$ROOT"
+
+cp "$IMAGE" "$ROOT/usr/sbin/ncp-fw/image.ebl"
+
+echo "==> transferring (do not interrupt once it reports a size)"
+chroot "$ROOT" /usr/sbin/TestNCP_SPI -u /usr/sbin/ncp-fw/image.ebl
+
+echo
+echo "==> done; checking the radio"
+teardown
+trap - EXIT INT TERM
+
+# Read the state here, while the service is still stopped and we own the GPIO
+# lines. Telling the user to run "ezsp-spi info" afterwards does not work: the
+# service is running by then and holds those lines exclusively, so it can only
+# answer EBUSY.
+INFO="$("$BIN" info 2>&1 || true)"
+echo "$INFO" | grep -E "EZSP v|EUI64|node id|network state|node type|pan id|radio channel" || true
+
+# Adopt the version the NCP now reports, so later commands skip the extra
+# reset that renegotiation costs.
+VER="$(echo "$INFO" | sed -n 's/.*EZSP v\([0-9][0-9]*\),.*/\1/p' | head -n1)"
+if [ -n "$VER" ] && [ "$(uci -q get ezsp-spi.radio.ezsp_version)" != "$VER" ]; then
+	uci set ezsp-spi.radio.ezsp_version="$VER"
+	uci commit ezsp-spi
+	echo
+	echo "==> ezsp_version set to $VER"
+fi
+
+echo
+if echo "$INFO" | grep -qE "network state +joined"; then
+	echo "==> the stored Zigbee network survived the upgrade; nothing to do"
+else
+	echo "==> not on a network. Open permit-join, then:"
+	echo "       /etc/init.d/ezsp-spi join"
+fi
+
+STOPPED_SERVICE=0
+/etc/init.d/ezsp-spi start >/dev/null 2>&1 || true
+echo "==> router service running"

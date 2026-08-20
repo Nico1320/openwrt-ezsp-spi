@@ -1,0 +1,8 @@
+# Proprietary vendor blob: extracted from Linksys firmware, not redistributable.
+package/ezsp-spi/files/zbroot.tar.gz
+tools/zbroot.tar.gz
+*.ebl
+
+
+# working notes, not for publication
+STATUS.md

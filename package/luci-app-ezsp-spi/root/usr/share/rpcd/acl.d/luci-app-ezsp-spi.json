@@ -1,0 +1,17 @@
+{
+	"luci-app-ezsp-spi": {
+		"description": "Grant access to the EZSP-SPI Zigbee router",
+		"read": {
+			"ubus": {
+				"ezsp": [ "status", "neighbors" ]
+			},
+			"uci": [ "ezsp-spi" ]
+		},
+		"write": {
+			"ubus": {
+				"ezsp": [ "join", "leave" ]
+			},
+			"uci": [ "ezsp-spi" ]
+		}
+	}
+}

@@ -1,0 +1,29 @@
+{
+	"admin/services/zigbee": {
+		"title": "Zigbee",
+		"order": 60,
+		"action": { "type": "firstchild" },
+		"depends": {
+			"acl": [ "luci-app-ezsp-spi" ],
+			"uci": { "ezsp-spi": true }
+		}
+	},
+
+	"admin/services/zigbee/overview": {
+		"title": "Overview",
+		"order": 10,
+		"action": { "type": "view", "path": "ezsp-spi/overview" }
+	},
+
+	"admin/services/zigbee/network": {
+		"title": "Network",
+		"order": 20,
+		"action": { "type": "view", "path": "ezsp-spi/network" }
+	},
+
+	"admin/services/zigbee/hardware": {
+		"title": "Hardware",
+		"order": 30,
+		"action": { "type": "view", "path": "ezsp-spi/hardware" }
+	}
+}

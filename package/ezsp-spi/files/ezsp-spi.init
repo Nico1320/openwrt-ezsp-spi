@@ -1,0 +1,128 @@
+#!/bin/sh /etc/rc.common
+# Bring the Zigbee NCP back up as a router on boot.
+#
+# The NCP keeps its network in NVM, so this only runs networkInit and then
+# stays alive draining callbacks and answering the control socket.
+
+USE_PROCD=1
+START=95
+STOP=10
+
+BIN=/usr/sbin/ezsp-spi
+
+radio_args() {
+	local spidev gpiochip reset wake hostint nssel_int nssel_int_mode speed socket report_secs ezsp_version
+	local extra=""
+
+	config_load ezsp-spi
+	config_get spidev   radio spidev   /dev/spidev1.0
+	config_get gpiochip radio gpiochip /dev/gpiochip0
+	config_get reset    radio reset    49
+	config_get wake     radio wake     ""
+	config_get hostint  radio hostint  50
+	# nSSEL_INT. Called "ncs" then "aux" before AN711 settled what it is;
+	# read the old keys so existing configs keep working. The line is left
+	# unset by default so the tool autodetects it -- V1 and V2 differ, and
+	# gpio29 is the eMMC's on the V1.
+	config_get nssel_int      radio nssel_int      ""
+	config_get nssel_int_mode radio nssel_int_mode ""
+	[ -n "$nssel_int" ]      || config_get nssel_int      radio aux ""
+	[ -n "$nssel_int_mode" ] || config_get nssel_int_mode radio aux_mode ""
+	[ -n "$nssel_int_mode" ] || config_get nssel_int_mode radio ncs_mode ""
+	[ -n "$nssel_int_mode" ] || nssel_int_mode=follow
+	[ -n "$wake" ]      && extra="$extra --wake $wake"
+	[ -n "$nssel_int" ] && extra="$extra --nssel-int $nssel_int"
+	config_get speed    radio speed    1000000
+	config_get socket   radio socket   /var/run/ezsp-spi.sock
+	config_get report_secs radio report_secs 300
+	config_get ezsp_version radio ezsp_version 4
+
+
+	echo "--spidev $spidev --chip $gpiochip" \
+	     "--reset $reset --int $hostint" \
+	     "--nssel-int-mode $nssel_int_mode" \
+	     "--speed $speed --socket $socket --report-secs $report_secs" \
+	     "--ezsp-version $ezsp_version $extra"
+}
+
+start_service() {
+	local enabled mode port bind
+
+	config_load ezsp-spi
+	config_get_bool enabled radio enabled 0
+	config_get mode radio mode router
+	[ "$enabled" = 1 ] || {
+		echo "ezsp-spi: disabled in /etc/config/ezsp-spi" >&2
+		return 0
+	}
+
+	# A line exported through legacy sysfs blocks the gpio chardev. The
+	# vendor zbshim.sh setup on the WHW03 leaves these behind.
+	for g in 541 543 561 562; do
+		echo $g > /sys/class/gpio/unexport 2>/dev/null
+	done
+
+	procd_open_instance
+	case "$mode" in
+	bridge)
+		# Hand the radio to zigbee2mqtt or bellows over TCP. They speak
+		# ASH and carry the whole EZSP command set, so this is what
+		# gets you coordinator mode.
+		config_get port bridge port 8888
+		config_get bind bridge bind 0.0.0.0
+		procd_set_param command $BIN bridge --port "$port" --bind "$bind" \
+			$(radio_args)
+		;;
+	*)
+		procd_set_param command $BIN run $(radio_args)
+		;;
+	esac
+	procd_set_param respawn 3600 10 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+# "join" is deliberately manual: it needs permit-join open on the coordinator,
+# and it writes the network into the NCP's NVM. Run it once, then the service
+# restores it on every boot.
+join() {
+	local channel pan_id mode
+
+	config_load ezsp-spi
+	config_get mode radio mode router
+	[ "$mode" = bridge ] && {
+		echo "mode is 'bridge' -- joining is the client's job, not ours" >&2
+		return 1
+	}
+	config_get channel network channel
+	config_get pan_id  network pan_id
+
+	[ -n "$channel" ] && [ -n "$pan_id" ] || {
+		echo "set network.channel and network.pan_id first" >&2
+		return 1
+	}
+
+	echo "stopping the service so the join can take the radio..."
+	stop
+
+	$BIN join --channel "$channel" --pan-id "$pan_id" $(radio_args)
+	local rc=$?
+
+	start
+	return $rc
+}
+
+leave() {
+	stop
+	$BIN leave $(radio_args)
+}
+
+# Note: no "status" action here. procd defines its own for USE_PROCD=1 and it
+# reports service state, not network state. For the Zigbee side ask the daemon
+# directly, which works while it is running:
+#
+#	ezsp-spi status
+EXTRA_COMMANDS="join leave"
+EXTRA_HELP="	join	Join the configured network as a router (open permit-join first)
+	leave	Leave the network and clear the stored state"
