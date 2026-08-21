@@ -108,6 +108,11 @@ join() {
 	$BIN join --channel "$channel" --pan-id "$pan_id" $(radio_args)
 	local rc=$?
 
+	# The restart resets the NCP, which costs a few seconds of silence right
+	# when the coordinator starts interviewing. It cannot be skipped: a
+	# fresh process needs a reset to get a clean EZSP session, and without
+	# one the version handshake misparses. Re-interview from the
+	# coordinator if the first attempt times out.
 	start
 	return $rc
 }

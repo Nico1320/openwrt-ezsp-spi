@@ -566,13 +566,26 @@ int cmd_run(void)
 
 	n = ezsp_cmd(spi, &p, EZSP_NETWORK_INIT, NULL, 0, out, sizeof(out));
 	if (n < 1 || out[0] != EMBER_SUCCESS) {
-		// Not joined is a normal state for a fresh install, not an
-		// error: exiting here would leave procd respawning in a loop
-		// and nothing able to answer status. Stay up unjoined so the
-		// control socket works and "join" has something to talk to.
-		printf("  not on a network yet (status 0x%02X) -- run "
-		       "\"/etc/init.d/ezsp-spi join\" with permit-join open\n",
-		       n >= 1 ? out[0] : 0xFF);
+		uint8_t st[8];
+		int s = ezsp_cmd(spi, &p, EZSP_NETWORK_STATE, NULL, 0, st,
+				 sizeof(st));
+
+		// With --no-reset the stack is still up from the command that
+		// ran before this one, and networkInit refuses because there is
+		// nothing to restore. Ask what state the NCP is actually in
+		// before calling that "not joined".
+		if (s >= 1 && st[0] == 0x02) {
+			printf("  network already up, routing as a router\n");
+		} else {
+			// Not joined is a normal state for a fresh install, not
+			// an error: exiting here would leave procd respawning in
+			// a loop and nothing able to answer status. Stay up
+			// unjoined so the control socket works and "join" has
+			// something to talk to.
+			printf("  not on a network yet (status 0x%02X) -- run "
+			       "\"/etc/init.d/ezsp-spi join\" with permit-join "
+			       "open\n", n >= 1 ? out[0] : 0xFF);
+		}
 	} else {
 		printf("  network restored from NVM, routing as a router\n");
 

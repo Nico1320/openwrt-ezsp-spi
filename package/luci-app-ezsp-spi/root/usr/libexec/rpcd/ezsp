@@ -6,6 +6,8 @@
 
 INIT=/etc/init.d/ezsp-spi
 BIN=/usr/sbin/ezsp-spi
+JOINLOG=/tmp/.ezsp-join.log
+JOINDONE=/tmp/.ezsp-join.done
 
 sock_path() {
 	local sock
@@ -205,6 +207,8 @@ list)
 	json_add_string channel ""
 	json_add_string pan_id ""
 	json_close_object
+	json_add_object join_status
+	json_close_object
 	json_add_object leave
 	json_close_object
 	json_dump
@@ -234,11 +238,26 @@ call)
 			uci commit ezsp-spi
 		fi
 
-		out=$($INIT join 2>&1)
-		rc=$?
+		# A join runs well past any browser RPC timeout: three attempts
+		# with a 60 s window each. Detach it and let the caller poll
+		# join_status, or the UI reports a timeout on a join that worked.
+		rm -f "$JOINLOG" "$JOINDONE"
+		( $INIT join >"$JOINLOG" 2>&1; echo $? >"$JOINDONE" ) </dev/null \
+			>/dev/null 2>&1 &
+
 		json_init
-		json_add_int code "$rc"
-		json_add_string output "$out"
+		json_add_boolean started 1
+		json_dump
+		;;
+	join_status)
+		json_init
+		if [ -f "$JOINDONE" ]; then
+			json_add_boolean running 0
+			json_add_int code "$(cat "$JOINDONE" 2>/dev/null || echo 1)"
+		else
+			json_add_boolean running 1
+		fi
+		json_add_string output "$(cat "$JOINLOG" 2>/dev/null)"
 		json_dump
 		;;
 	leave)

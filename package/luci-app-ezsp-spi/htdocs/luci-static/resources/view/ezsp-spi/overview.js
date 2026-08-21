@@ -9,6 +9,39 @@ var callJoin   = rpc.declare({ object: 'ezsp', method: 'join',   expect: { },
                                params: [ 'channel', 'pan_id' ] });
 var callLeave  = rpc.declare({ object: 'ezsp', method: 'leave',  expect: { } });
 var callScan   = rpc.declare({ object: 'ezsp', method: 'scan',   expect: { } });
+var callJoinStatus = rpc.declare({ object: 'ezsp', method: 'join_status',
+                                   expect: { } });
+
+// The join runs detached because it outlives any RPC timeout. Poll until the
+// backend reports it finished, then show whatever it printed.
+function awaitJoin(onDone) {
+	var tries = 0;
+
+	var tick = function() {
+		return callJoinStatus().then(function(js) {
+			js = js || {};
+			if (!js.running || ++tries > 60)
+				return onDone(js);
+			window.setTimeout(tick, 2000);
+		}).catch(function() {
+			window.setTimeout(tick, 2000);
+		});
+	};
+
+	window.setTimeout(tick, 2000);
+}
+
+function showJoinResult(js) {
+	ui.hideModal();
+	ui.showModal(_('Result'), [
+		E('pre', { 'style': 'max-height:24em;overflow:auto' },
+			[ (js && js.output) || _('No output') ]),
+		E('div', { 'class': 'right' }, [
+			E('button', { 'class': 'btn cbi-button',
+				      'click': ui.hideModal }, [ _('Close') ])
+		])
+	]);
+}
 
 var history = [];
 var lastSent = null, lastFailed = null;
@@ -215,16 +248,8 @@ function joinNetwork(ch, pan) {
 			[ _('Joining channel %s, PAN %s…').format(ch, pan) ])
 	]);
 
-	return callJoin(String(ch), String(parseInt(pan, 16))).then(function(res) {
-		ui.hideModal();
-		ui.showModal(_('Result'), [
-			E('pre', { 'style': 'max-height:24em;overflow:auto' },
-				[ (res && res.output) || _('No output') ]),
-			E('div', { 'class': 'right' }, [
-				E('button', { 'class': 'btn cbi-button',
-					      'click': ui.hideModal }, [ _('Close') ])
-			])
-		]);
+	return callJoin(String(ch), String(parseInt(pan, 16))).then(function() {
+		awaitJoin(showJoinResult);
 	}).catch(function(err) {
 		ui.hideModal();
 		ui.addNotification(null, E('p', {}, [ '' + err ]), 'error');
@@ -408,7 +433,19 @@ return view.extend({
 					E('button', {
 						'class': 'btn cbi-button cbi-button-apply',
 						'disabled': bridge ? '' : null,
-						'click': action(callJoin, _('Joining the network…'))
+						'click': ui.createHandlerFn(this, function() {
+							ui.showModal(_('Please wait'), [
+								E('p', { 'class': 'spinning' },
+									[ _('Joining…') ])
+							]);
+							return callJoin('', '').then(function() {
+								awaitJoin(showJoinResult);
+							}).catch(function(err) {
+								ui.hideModal();
+								ui.addNotification(null,
+									E('p', {}, [ '' + err ]), 'error');
+							});
+						})
 					}, [ _('Join configured') ]),
 					E('button', {
 						'class': 'btn cbi-button cbi-button-reset',

@@ -5,7 +5,8 @@
             "ubus": {
                 "ezsp": [
                     "status",
-                    "neighbors"
+                    "neighbors",
+                    "join_status"
                 ]
             },
             "uci": [
