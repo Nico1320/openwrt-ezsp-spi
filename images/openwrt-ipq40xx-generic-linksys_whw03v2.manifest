@@ -109,7 +109,7 @@ libudebug - 2026.01.16~875e1a7a
 libustream-mbedtls20201210 - 2026.03.01~99f1c0db-r1
 logd - 2025.10.30~6f78fa49-r1
 luci - 26.230.68036~04ab59d
-luci-app-ezsp-spi - 0.260820.85497
+luci-app-ezsp-spi - 0.260821.56286
 luci-app-firewall - 26.230.68036~04ab59d
 luci-app-package-manager - 26.230.68036~04ab59d
 luci-base - 26.230.68036~04ab59d
