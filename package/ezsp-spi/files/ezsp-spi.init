@@ -65,9 +65,8 @@ start_service() {
 	procd_open_instance
 	case "$mode" in
 	bridge)
-		# Hand the radio to zigbee2mqtt or bellows over TCP. They speak
-		# ASH and carry the whole EZSP command set, so this is what
-		# gets you coordinator mode.
+		# Hand the radio to a host over TCP as an ASH endpoint, which
+		# is what gets you coordinator mode.
 		config_get port bridge port 8888
 		config_get bind bridge bind 0.0.0.0
 		procd_set_param command $BIN bridge --port "$port" --bind "$bind" \
@@ -118,11 +117,30 @@ leave() {
 	$BIN leave $(radio_args)
 }
 
+scan() {
+	local mode
+
+	config_load ezsp-spi
+	config_get mode radio mode router
+	[ "$mode" = bridge ] && {
+		echo "mode is 'bridge' -- the client owns the radio" >&2
+		return 1
+	}
+
+	stop
+	$BIN scan $(radio_args)
+	local rc=$?
+
+	start
+	return $rc
+}
+
 # Note: no "status" action here. procd defines its own for USE_PROCD=1 and it
 # reports service state, not network state. For the Zigbee side ask the daemon
 # directly, which works while it is running:
 #
 #	ezsp-spi status
-EXTRA_COMMANDS="join leave"
+EXTRA_COMMANDS="join leave scan"
 EXTRA_HELP="	join	Join the configured network as a router (open permit-join first)
-	leave	Leave the network and clear the stored state"
+	leave	Leave the network and clear the stored state
+	scan	List the Zigbee networks the radio can hear"

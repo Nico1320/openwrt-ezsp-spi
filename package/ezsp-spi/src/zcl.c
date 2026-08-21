@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------- ZCL app --
 //
 // Without this the node is invisible at the application layer: no endpoints, no
-// clusters, nothing ever transmitted. zigbee2mqtt shows it as an unsupported
+// clusters, nothing ever transmitted. A coordinator shows it as an unsupported
 // device with linkquality N/A, because linkquality is metadata on frames the
 // coordinator *receives*, and this node never sent any.
 //
@@ -328,7 +328,7 @@ int cmd_join(void)
 
 	if (!cfg.channel || !cfg.have_pan_id)
 		die("join needs --channel and --pan-id "
-		    "(both are in the zigbee2mqtt config)");
+		    "(both come from your coordinator)");
 
 	if (!cfg.have_ext_pan_id && cfg.no_precheck)
 		die("--no-precheck means the ext pan id cannot be discovered, "
@@ -383,7 +383,7 @@ int cmd_join(void)
 			if (!allowing) {
 				printf("\n  permit-join is CLOSED on this "
 				       "network.\n");
-				printf("  Open it in zigbee2mqtt and re-run "
+				printf("  Open permit-join on the coordinator and re-run "
 				       "within the join window.\n");
 				goto fail;
 			}
@@ -396,7 +396,7 @@ int cmd_join(void)
 	//
 	// The key table and trust centre address cache both default to zero on
 	// this NCP, which leaves the node nowhere to put the trust centre link
-	// key it needs to finish authenticating. bellows sets these for the
+	// key it needs to finish authenticating. Clients set these for the
 	// same reason.
 	ezsp_apply_config(spi, &p, 1);
 

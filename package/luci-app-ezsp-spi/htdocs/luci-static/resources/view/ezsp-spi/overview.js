@@ -5,8 +5,10 @@
 'require ui';
 
 var callStatus = rpc.declare({ object: 'ezsp', method: 'status', expect: { } });
-var callJoin   = rpc.declare({ object: 'ezsp', method: 'join',   expect: { } });
+var callJoin   = rpc.declare({ object: 'ezsp', method: 'join',   expect: { },
+                               params: [ 'channel', 'pan_id' ] });
 var callLeave  = rpc.declare({ object: 'ezsp', method: 'leave',  expect: { } });
+var callScan   = rpc.declare({ object: 'ezsp', method: 'scan',   expect: { } });
 
 var history = [];
 var lastSent = null, lastFailed = null;
@@ -178,9 +180,18 @@ function healthPanel(st) {
 }
 
 function updateHealth(root, st) {
+	// Counters are meaningless once the node is off the network; leaving them
+	// on screen reads as if it were still reporting.
+	if (st.state !== 'joined') {
+		history = [];
+		lastSent = null;
+		lastFailed = null;
+	}
+
+	var joined = (st.state === 'joined');
 	var s = parseInt(st.reports_sent, 10) || 0;
 	var f = parseInt(st.reports_failed, 10) || 0;
-	var rate = s ? Math.round(((s - f) / s) * 100) : null;
+	var rate = (joined && s) ? Math.round(((s - f) / s) * 100) : null;
 
 	var el = root.querySelector('[data-ez="rate"]');
 	if (el) {
@@ -191,11 +202,133 @@ function updateHealth(root, st) {
 	}
 
 	el = root.querySelector('[data-ez="last"]');
-	if (el) el.textContent = st.last_report || '—';
+	if (el) el.textContent = joined ? (st.last_report || '—') : '—';
 
 	var host = root.querySelector('#ez-spark-host');
 	if (!host) return;
 	if (host) { host.innerHTML = ''; host.appendChild(sparkline(history)); }
+}
+
+function joinNetwork(ch, pan) {
+	ui.showModal(_('Please wait'), [
+		E('p', { 'class': 'spinning' },
+			[ _('Joining channel %s, PAN %s…').format(ch, pan) ])
+	]);
+
+	return callJoin(String(ch), String(parseInt(pan, 16))).then(function(res) {
+		ui.hideModal();
+		ui.showModal(_('Result'), [
+			E('pre', { 'style': 'max-height:24em;overflow:auto' },
+				[ (res && res.output) || _('No output') ]),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn cbi-button',
+					      'click': ui.hideModal }, [ _('Close') ])
+			])
+		]);
+	}).catch(function(err) {
+		ui.hideModal();
+		ui.addNotification(null, E('p', {}, [ '' + err ]), 'error');
+	});
+}
+
+// Every router and coordinator on a network answers a beacon request, so a scan
+// returns one entry per device, not per network. Collapse them: the beacon
+// carries no sender id, so devices are only distinguishable by signal.
+function dedupe(list) {
+	var by = {};
+
+	(list || []).forEach(function(n) {
+		var k = n.channel + '/' + n.pan_id;
+		if (!by[k]) {
+			by[k] = { channel: n.channel, pan_id: n.pan_id,
+				  ext_pan_id: n.ext_pan_id, joinable: n.joinable,
+				  lqi: n.lqi, rssi: n.rssi, seen: 1 };
+			return;
+		}
+		by[k].seen++;
+		by[k].joinable = by[k].joinable || n.joinable;
+		if (n.lqi > by[k].lqi) { by[k].lqi = n.lqi; by[k].rssi = n.rssi; }
+	});
+
+	return Object.keys(by).map(function(k) { return by[k]; });
+}
+
+function scanRows(list) {
+	var nets = dedupe(list);
+
+	if (!nets.length)
+		return [ E('tr', {}, [ E('td', { 'colspan': '7',
+			'style': 'padding:1rem;opacity:.7' },
+			[ _('No networks heard.') ]) ]) ];
+
+	nets.sort(function(a, b) { return b.lqi - a.lqi; });
+
+	return nets.map(function(n) {
+		return E('tr', { 'class': 'tr' }, [
+			E('td', { 'class': 'td' }, [ String(n.channel) ]),
+			E('td', { 'class': 'td' }, [ n.pan_id ]),
+			E('td', { 'class': 'td',
+				  'style': 'font-family:ui-monospace,monospace;font-size:.85em' },
+				[ n.ext_pan_id || '—' ]),
+			E('td', { 'class': 'td' }, [ n.lqi + ' / ' + n.rssi + ' dBm' ]),
+			E('td', { 'class': 'td' }, [ String(n.seen) ]),
+			E('td', { 'class': 'td' }, [ n.joinable
+				? E('span', { 'style': 'color:var(--ez-ok);font-weight:600' },
+					[ _('open') ])
+				: E('span', { 'style': 'opacity:.6' }, [ _('closed') ]) ]),
+			E('td', { 'class': 'td' }, [
+				E('button', {
+					'class': 'btn cbi-button cbi-button-apply',
+					'disabled': n.joinable ? null : '',
+					'click': ui.createHandlerFn(this, function() {
+						return joinNetwork(n.channel, n.pan_id);
+					})
+				}, [ _('Join') ])
+			])
+		]);
+	});
+}
+
+function doScan() {
+	ui.showModal(_('Scanning'), [
+		E('p', { 'class': 'spinning' },
+			[ _('Takes the radio off the network for a few seconds…') ])
+	]);
+
+	var nets = [];
+
+	// The scan stops the daemon, so status is only readable once it is back.
+	return callScan().then(function(res) {
+		nets = (res && res.networks) || [];
+		return callStatus();
+	}).then(function(st) {
+		st = st || {};
+		ui.hideModal();
+		ui.showModal(_('Networks heard'), [
+			E('p', { 'style': 'opacity:.75;font-size:.9em' }, [
+				_('This node: %s  %s').format(
+					st.node_id || _('not joined'), st.eui64 || '')
+			]),
+			E('table', { 'class': 'table' }, [
+				E('tr', { 'class': 'tr table-titles' }, [
+					E('th', { 'class': 'th' }, [ _('Channel') ]),
+					E('th', { 'class': 'th' }, [ _('PAN ID') ]),
+					E('th', { 'class': 'th' }, [ _('Extended PAN') ]),
+					E('th', { 'class': 'th' }, [ _('LQI / RSSI') ]),
+					E('th', { 'class': 'th' }, [ _('Devices') ]),
+					E('th', { 'class': 'th' }, [ _('Join') ]),
+					E('th', { 'class': 'th' }, [ '' ])
+				])
+			].concat(scanRows(nets))),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn cbi-button',
+					      'click': ui.hideModal }, [ _('Close') ])
+			])
+		]);
+	}).catch(function(err) {
+		ui.hideModal();
+		ui.addNotification(null, E('p', {}, [ '' + err ]), 'error');
+	});
 }
 
 function action(fn, busyText, confirmText) {
@@ -268,10 +401,15 @@ return view.extend({
 				]),
 				E('div', { 'class': 'ez-actions' }, [
 					E('button', {
+						'class': 'btn cbi-button cbi-button-action',
+						'disabled': bridge ? '' : null,
+						'click': ui.createHandlerFn(this, doScan)
+					}, [ _('Scan and join') ]),
+					E('button', {
 						'class': 'btn cbi-button cbi-button-apply',
 						'disabled': bridge ? '' : null,
 						'click': action(callJoin, _('Joining the network…'))
-					}, [ _('Join network') ]),
+					}, [ _('Join configured') ]),
 					E('button', {
 						'class': 'btn cbi-button cbi-button-reset',
 						'disabled': bridge ? '' : null,

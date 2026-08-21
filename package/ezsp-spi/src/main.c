@@ -21,8 +21,8 @@ void usage(void)
 "  join    join an existing network as a router (needs --channel and\n"
 "          --pan-id; open permit-join on the coordinator first)\n"
 "  run     restore the joined network from NVM and stay up\n"
-"  bridge  serve the radio over TCP as an ASH endpoint, so zigbee2mqtt\n"
-"          or bellows can drive it directly, coordinator included\n"
+"  bridge  serve the radio over TCP as an ASH endpoint, coordinator\n"
+"          included\n"
 "  leave   leave the network and clear the stored state (undoes join)\n"
 "\n"
 "options:\n"
@@ -49,7 +49,6 @@ void usage(void)
 "bridge options:\n"
 "  --port N         tcp port to listen on (default %u)\n"
 "  --bind ADDR      address to listen on  (default %s)\n"
-"                   zigbee2mqtt: adapter ezsp, port tcp://<host>:%u\n"
 "\n"
 "join options:\n"
 "  --channel N            radio channel\n"
@@ -67,8 +66,7 @@ void usage(void)
 "  -v               hexdump every transfer\n",
 	cfg.spidev, cfg.gpiochip, cfg.reset_line, cfg.wake_line, cfg.int_line,
 	cfg.nssel_int_line, cfg.nssel_int_mode, cfg.speed, cfg.gap_us,
-	cfg.wait_bytes, cfg.bridge_port, cfg.bind_addr,
-	cfg.bridge_port);
+	cfg.wait_bytes, cfg.bridge_port, cfg.bind_addr);
 }
 
 int main(int argc, char **argv)

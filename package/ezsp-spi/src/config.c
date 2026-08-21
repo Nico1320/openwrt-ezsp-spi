@@ -4,7 +4,7 @@
 // on the Linksys WHW03 V2 (Velop), OpenWrt / kernel 6.6.
 //
 // Replaces the vendor TestNCP_SPI binary with something that does not need a
-// uClibc chroot, and that we can extend into an ASH bridge for bellows/zigpy.
+// uClibc chroot, and that we can extend into an ASH bridge.
 //
 // Protocol reference: Silabs UG100 (EZSP) and AN711 (EZSP-SPI host interfacing).
 //
@@ -31,7 +31,7 @@
 
 // NCP error responses (single byte, some carry one data byte)
 
-// EmberInitialSecurityBitmask (values from bellows' EZSP type tables)
+// EmberInitialSecurityBitmask (EZSP type tables)
 
 // ---------------------------------------------------------------- defaults --
 

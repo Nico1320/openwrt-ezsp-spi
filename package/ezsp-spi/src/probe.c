@@ -56,9 +56,9 @@ enum rsp_class do_cmd(int spi, struct pins *p, const uint8_t *tx,
 	cls = classify(rx, n, &first, &data);
 
 	if (cls == RSP_RESET && retry_on_reset) {
-		if (!cfg.quiet)
-			printf("  (reset notification, reason %u -- "
-			       "re-sending)\n", data);
+		if (cfg.verbose)
+			printf("  (reset notification: %s -- re-sending)\n",
+			       reset_reason(data));
 		usleep(cfg.gap_us);
 		if (cfg.wake_handshake)
 			ncp_wake(p);

@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------- EZSP v4 --
 //
 // Frame IDs are version specific; these are EZSP v4, which is what this NCP
-// reports (EmberZNet 5.8.1.0). Cross-checked against bellows' v4 command table.
+// reports (EmberZNet 5.8.1.0).
 
 
 
@@ -169,7 +169,7 @@ int ezsp_init(int spi, struct pins *p)
 	}
 
 	// v4..v8 are additive: each version appends commands without renumbering
-	// the existing ones -- verified against bellows' tables, every id this
+	// the existing ones -- every id this
 	// tool uses is identical across v4 and v8. The frame header above is
 	// the entire difference.
 	cfg.ezsp_version = out[0];
@@ -223,7 +223,7 @@ const char *ember_status_name(uint8_t s)
 // reports the ext pan id exactly as it appears on the air plus the join flag.
 //
 // Reading the ext pan id off the air removes the byte-order guesswork: the
-// zigbee2mqtt config lists it in the opposite order to the wire format, which
+// Coordinator configs often list it in the opposite order to the wire format, which
 // is not something the host can infer.
 int scan_find(int spi, struct pins *p, unsigned channel, uint16_t pan_id,
 		     uint8_t ext[8], int *allowing, uint8_t *nwk_update_id)

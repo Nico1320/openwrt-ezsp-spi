@@ -33,6 +33,18 @@ return view.extend({
 		o.placeholder = '0.0.0.0';
 		o.optional = true;
 
+		s = m.section(form.NamedSection, 'network', 'network', _('Network'),
+			_('The network to join. Take both from your coordinator.'));
+
+		o = s.option(form.Value, 'channel', _('Channel'));
+		o.datatype = 'range(11,26)';
+		o.placeholder = '25';
+
+		o = s.option(form.Value, 'pan_id', _('PAN ID'),
+			_('Decimal. 0x1338 is 4920.'));
+		o.datatype = 'range(0,65535)';
+		o.placeholder = '4920';
+
 		s = m.section(form.NamedSection, 'radio', 'radio', _('Interface'));
 
 		o = s.option(form.Value, 'spidev', _('SPI device'));

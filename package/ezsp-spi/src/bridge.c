@@ -2,11 +2,8 @@
 
 // ------------------------------------------------------------------ bridge --
 //
-// ASH over TCP, so zigbee-herdsman (zigbee2mqtt) and bellows (ZHA) can drive
-// the radio directly, coordinator included:
-//
-//   zigbee2mqtt:  serial: { adapter: ezsp, port: tcp://<router>:8888 }
-//   bellows:      socket://<router>:8888
+// ASH over TCP, so a host-side Zigbee stack can drive the radio directly,
+// coordinator included.
 //
 // Relays EZSP frames verbatim in both directions and translates callback
 // delivery, which is polled on SPI but pushed on a UART. See DESIGN.md.
@@ -476,8 +473,6 @@ int cmd_bridge(void)
 	b.srv = bridge_listen(cfg.bind_addr, cfg.bridge_port);
 	printf("  listening on %s:%d\n",
 	       cfg.bind_addr && *cfg.bind_addr ? cfg.bind_addr : "0.0.0.0",
-	       cfg.bridge_port);
-	printf("  zigbee2mqtt: adapter ezsp, port tcp://<this host>:%d\n",
 	       cfg.bridge_port);
 	fflush(stdout);
 

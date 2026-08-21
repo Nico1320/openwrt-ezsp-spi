@@ -74,6 +74,55 @@ emit_status() {
 	json_dump
 }
 
+emit_scan() {
+	local out mode parsed ch pan ext joinable lqi rssi
+
+	config_load ezsp-spi
+	config_get mode radio mode router
+
+	if [ "$mode" = bridge ]; then
+		json_init
+		json_add_boolean available 0
+		json_add_array networks
+		json_close_array
+		json_dump
+		return
+	fi
+
+	out=$($INIT scan 2>&1)
+
+	parsed=$(echo "$out" | awk '
+		/^  network on channel/ { ch = $4; have = 1; next }
+		have && /^    pan id/        { pan = $3; next }
+		have && /^    ext pan id/    { ext = $4; next }
+		have && /^    allowing join/ { j = $3; next }
+		have && /^    lqi \/ rssi/   {
+			printf "%s|%s|%s|%s|%s|%s\n", ch, pan, ext, j, $4, $6
+			have = 0; next }
+	')
+
+	json_init
+	json_add_boolean available 1
+	json_add_array networks
+	while IFS='|' read -r ch pan ext joinable lqi rssi; do
+		[ -n "$ch" ] || continue
+		json_add_object
+		json_add_int channel "$ch"
+		json_add_string pan_id "$pan"
+		json_add_string ext_pan_id "$ext"
+		[ "$joinable" = YES ] && json_add_boolean joinable 1 \
+				      || json_add_boolean joinable 0
+		json_add_int lqi "${lqi:-0}"
+		json_add_int rssi "${rssi:-0}"
+		json_close_object
+	done <<-EOF
+	$parsed
+	EOF
+	json_close_array
+	json_add_string raw "$out"
+	json_dump
+}
+
 emit_neighbors() {
 	local out sock line addr lqi incost outcost dest via state mode
 
@@ -150,7 +199,11 @@ list)
 	json_close_object
 	json_add_object neighbors
 	json_close_object
+	json_add_object scan
+	json_close_object
 	json_add_object join
+	json_add_string channel ""
+	json_add_string pan_id ""
 	json_close_object
 	json_add_object leave
 	json_close_object
@@ -164,7 +217,23 @@ call)
 	neighbors)
 		emit_neighbors
 		;;
+	scan)
+		emit_scan
+		;;
 	join)
+		# Optional channel/pan_id: written to uci first, so the UI can join
+		# a scanned network without the user editing the config.
+		read -r input
+		json_load "${input:-{\}}" 2>/dev/null
+		json_get_var arg_ch channel
+		json_get_var arg_pan pan_id
+
+		if [ -n "$arg_ch" ] && [ -n "$arg_pan" ]; then
+			uci set ezsp-spi.network.channel="$arg_ch"
+			uci set ezsp-spi.network.pan_id="$arg_pan"
+			uci commit ezsp-spi
+		fi
+
 		out=$($INIT join 2>&1)
 		rc=$?
 		json_init

@@ -715,7 +715,7 @@ int reverse_ext_pan_id;
 
 // Accepts both shapes people actually have to hand:
 //   colon separated hex   AA:BB:CC:DD:EE:FF:00:11
-//   comma separated decimal, as printed in the zigbee2mqtt config
+//   comma separated decimal
 //                         139,170,157,111,100,162,112,45
 void parse_ext_pan_id(const char *s)
 {
