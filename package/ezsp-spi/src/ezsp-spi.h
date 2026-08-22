@@ -44,7 +44,6 @@ struct cfg {
 	int reset_set, wake_set, int_set, nssel_int_set, cs_set;
 	unsigned cs_line;
 	const char *nssel_int_mode;
-	const char *identify_led;	// space separated /sys/class/leds names
 	unsigned wait_bytes;
 	unsigned ezsp_version;	// negotiated; picks the frame layout
 	unsigned ezsp_want;	// version to ask for first
@@ -145,9 +144,6 @@ enum rsp_class {
 #define ZCL_PROFILE_ZDO			0x0000
 #define ZCL_DEVICE_RANGE_EXTENDER	0x0008	// what this node actually is
 #define ZCL_CLUSTER_BASIC		0x0000
-#define ZCL_CLUSTER_IDENTIFY		0x0003
-#define ZCL_CMD_IDENTIFY		0x00
-#define ZCL_CMD_IDENTIFY_QUERY		0x01
 #define ZDO_MGMT_PERMIT_JOINING_REQ	0x0036
 #define ZCL_ENDPOINT			1
 #define ASH_FLAG		0x7E
@@ -249,10 +245,6 @@ extern const char zcl_manufacturer[];
 extern const char zcl_model[];
 extern const char zcl_swbuild[];
 unsigned report_interval(void);
-void identify_start(unsigned secs);
-void identify_tick(void);
-int identify_active(void);
-extern unsigned identify_time;
 extern time_t report_last;
 const char *zcl_location(void);
 int ezsp_add_endpoint(int spi, struct pins *p);

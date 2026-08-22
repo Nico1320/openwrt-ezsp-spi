@@ -50,8 +50,6 @@ void usage(void)
 "  --port N         tcp port to listen on (default %u)\n"
 "  --bind ADDR      address to listen on  (default %s)\n"
 "\n"
-"  --identify-led LEDS  /sys/class/leds names to blink on Identify\n"
-"\n"
 "join options:\n"
 "  --channel N            radio channel\n"
 "  --pan-id 0xNNNN        pan id\n"
@@ -106,7 +104,6 @@ int main(int argc, char **argv)
 		{ "ezsp-version", required_argument, NULL, 31 },
 		{ "port",	required_argument, NULL, 33 },
 		{ "bind",	required_argument, NULL, 34 },
-		{ "identify-led", required_argument, NULL, 35 },
 		{ "socket",	required_argument, NULL, 28 },
 		{ "help",	no_argument,	   NULL, 'h' },
 		{ NULL, 0, NULL, 0 },
@@ -127,7 +124,6 @@ int main(int argc, char **argv)
 		case 33: cfg.bridge_port = (unsigned)strtoul(optarg, NULL, 0);
 			 break;
 		case 34: cfg.bind_addr = optarg; break;
-		case 35: cfg.identify_led = optarg; break;
 		case 1:  cfg.spidev = optarg; break;
 		case 2:  cfg.gpiochip = optarg; break;
 		case 3:  cfg.reset_line = strtoul(optarg, NULL, 0);

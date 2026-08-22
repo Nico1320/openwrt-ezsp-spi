@@ -48,7 +48,6 @@ struct cfg cfg = {
 	.cs_line	= 45,	// spiCS -- driven here, not by the kernel
 	// Driven with nSSEL, as AN711 requires. See DESIGN.md.
 	.nssel_int_mode	= "follow",
-	.identify_led	= "",
 	// Commands that touch the radio (joinNetwork, startScan) take far
 	// longer to answer than the SPI-level queries; 64 bytes at 1 MHz is
 	// only ~0.5 ms and joinNetwork was intermittently missing its reply.

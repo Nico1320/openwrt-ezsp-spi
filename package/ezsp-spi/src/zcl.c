@@ -60,163 +60,6 @@ unsigned report_count;		// reports handed to the stack
 unsigned report_failed;		// rejected or not delivered
 time_t report_last;
 
-// -------------------------------------------------------------- identify --
-//
-// Identify is mandatory on a Home Automation endpoint. The cluster works with
-// no indicator at all -- plenty of devices have none -- so the LED is optional
-// and named in the config. Nothing is touched unless identify_led is set, and
-// whatever the LED was doing before is put back afterwards.
-
-unsigned identify_time;			// seconds left; ZCL attribute 0x0000
-
-#define IDENTIFY_LEDS 4
-static char led_path[IDENTIFY_LEDS][64];
-static char led_trigger[IDENTIFY_LEDS][32];
-static int led_bright[IDENTIFY_LEDS];
-static int led_n;
-static int led_on;
-
-static void led_write(const char *path, const char *what, const char *val)
-{
-	char f[96];
-	FILE *fp;
-
-	snprintf(f, sizeof(f), "%s/%s", path, what);
-	fp = fopen(f, "w");
-	if (!fp)
-		return;
-	fputs(val, fp);
-	fclose(fp);
-}
-
-static void led_read(const char *path, const char *what, char *buf, size_t max)
-{
-	char f[96];
-	FILE *fp;
-
-	buf[0] = '\0';
-	snprintf(f, sizeof(f), "%s/%s", path, what);
-	fp = fopen(f, "r");
-	if (!fp)
-		return;
-	if (!fgets(buf, (int)max, fp))
-		buf[0] = '\0';
-	fclose(fp);
-	buf[strcspn(buf, "\n")] = '\0';
-}
-
-// The trigger file lists every trigger, with the active one in [brackets].
-static void led_active_trigger(const char *path, char *out, size_t max)
-{
-	char buf[512], *a, *b;
-
-	led_read(path, "trigger", buf, sizeof(buf));
-	a = strchr(buf, '[');
-	b = a ? strchr(a, ']') : NULL;
-	if (!a || !b || (size_t)(b - a) >= max) {
-		snprintf(out, max, "none");
-		return;
-	}
-	*b = '\0';
-	snprintf(out, max, "%s", a + 1);
-}
-
-static void identify_led_claim(void)
-{
-	char list[256], *tok, *save = NULL;
-
-	led_n = 0;
-	if (!cfg.identify_led || !*cfg.identify_led)
-		return;
-
-	snprintf(list, sizeof(list), "%s", cfg.identify_led);
-	for (tok = strtok_r(list, " ,", &save);
-	     tok && led_n < IDENTIFY_LEDS;
-	     tok = strtok_r(NULL, " ,", &save)) {
-		char b[32];
-
-		snprintf(led_path[led_n], sizeof(led_path[0]),
-			 "/sys/class/leds/%s", tok);
-		if (access(led_path[led_n], F_OK) != 0) {
-			printf("  identify: no led %s\n", tok);
-			continue;
-		}
-		led_active_trigger(led_path[led_n], led_trigger[led_n],
-				   sizeof(led_trigger[0]));
-		led_read(led_path[led_n], "brightness", b, sizeof(b));
-		led_bright[led_n] = atoi(b);
-		led_write(led_path[led_n], "trigger", "none");
-		led_n++;
-	}
-}
-
-static void identify_led_release(void)
-{
-	int i;
-
-	for (i = 0; i < led_n; i++) {
-		char v[16];
-
-		snprintf(v, sizeof(v), "%d", led_bright[i]);
-		led_write(led_path[i], "brightness", v);
-		led_write(led_path[i], "trigger", led_trigger[i]);
-	}
-	led_n = 0;
-	led_on = 0;
-}
-
-static void identify_led_toggle(void)
-{
-	int i;
-
-	led_on = !led_on;
-	for (i = 0; i < led_n; i++)
-		led_write(led_path[i], "brightness", led_on ? "255" : "0");
-}
-
-int identify_active(void)
-{
-	return identify_time > 0;
-}
-
-void identify_start(unsigned secs)
-{
-	if (!secs) {
-		if (identify_time)
-			identify_led_release();
-		identify_time = 0;
-		return;
-	}
-
-	if (!identify_time)
-		identify_led_claim();
-
-	identify_time = secs;
-	printf("  identify for %u s\n", secs);
-	fflush(stdout);
-}
-
-// Called from the run loop about twice a second.
-void identify_tick(void)
-{
-	static time_t last;
-	time_t now = time(NULL);
-
-	if (!identify_time)
-		return;
-
-	identify_led_toggle();
-
-	if (now != last) {
-		last = now;
-		if (--identify_time == 0) {
-			identify_led_release();
-			printf("  identify done\n");
-			fflush(stdout);
-		}
-	}
-}
-
 // The hostname goes in LocationDescription rather than the model, because
 // converters match on model: giving each node a different model string would
 // need a converter per node, whereas one "WHW03V2" definition covers them all
@@ -244,12 +87,10 @@ int ezsp_add_endpoint(int spi, struct pins *p)
 	params[n++] = ZCL_DEVICE_RANGE_EXTENDER & 0xFF;
 	params[n++] = ZCL_DEVICE_RANGE_EXTENDER >> 8;
 	params[n++] = 1;			// device version
-	params[n++] = 2;			// input cluster count
+	params[n++] = 1;			// input cluster count
 	params[n++] = 0;			// output cluster count
 	params[n++] = ZCL_CLUSTER_BASIC & 0xFF;
 	params[n++] = ZCL_CLUSTER_BASIC >> 8;
-	params[n++] = ZCL_CLUSTER_IDENTIFY & 0xFF;
-	params[n++] = ZCL_CLUSTER_IDENTIFY >> 8;
 
 	r = ezsp_cmd(spi, p, EZSP_ADD_ENDPOINT, params, n, out, sizeof(out));
 
@@ -394,53 +235,6 @@ void zcl_handle_incoming(int spi, struct pins *p, const uint8_t *m,
 		return;
 	seq = zcl[i++];
 	cmd = zcl[i++];
-
-	if (cluster == ZCL_CLUSTER_IDENTIFY) {
-		// Cluster-specific commands.
-		if ((fc & 0x03) == 0x01) {
-			if (cmd == ZCL_CMD_IDENTIFY && i + 1 < zlen) {
-				identify_start((unsigned)(zcl[i] |
-							  (zcl[i + 1] << 8)));
-			} else if (cmd == ZCL_CMD_IDENTIFY_QUERY) {
-				if (!identify_time)
-					return;	// silent unless identifying
-				resp[at++] = 0x19;	// cluster specific, s->c
-				resp[at++] = seq;
-				resp[at++] = 0x00;	// IdentifyQueryResponse
-				resp[at++] = (uint8_t)(identify_time & 0xFF);
-				resp[at++] = (uint8_t)(identify_time >> 8);
-				zcl_send(spi, p, sender, ZCL_CLUSTER_IDENTIFY,
-					 resp, at);
-			}
-			return;
-		}
-
-		// Profile-wide Read Attributes: only IdentifyTime exists.
-		if ((fc & 0x03) != 0x00 || cmd != 0x00)
-			return;
-
-		resp[at++] = 0x18;
-		resp[at++] = seq;
-		resp[at++] = 0x01;		// Read Attributes Response
-		for (; i + 1 < zlen; i += 2) {
-			uint16_t id = (uint16_t)(zcl[i] | (zcl[i + 1] << 8));
-
-			if (at + 6 > sizeof(resp))
-				break;
-			resp[at++] = (uint8_t)(id & 0xFF);
-			resp[at++] = (uint8_t)(id >> 8);
-			if (id == 0x0000) {
-				resp[at++] = 0x00;		// SUCCESS
-				resp[at++] = 0x21;		// uint16
-				resp[at++] = (uint8_t)(identify_time & 0xFF);
-				resp[at++] = (uint8_t)(identify_time >> 8);
-			} else {
-				resp[at++] = 0x86;	// UNSUPPORTED_ATTRIBUTE
-			}
-		}
-		zcl_send(spi, p, sender, ZCL_CLUSTER_IDENTIFY, resp, at);
-		return;
-	}
 
 	if (cluster != ZCL_CLUSTER_BASIC)
 		return;
