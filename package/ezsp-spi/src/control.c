@@ -634,6 +634,10 @@ int cmd_run(void)
 				timeout = (int)(due * 1000);
 		}
 
+		// Identifying needs a blink, so wake often enough to toggle.
+		if (identify_active() && timeout > 400)
+			timeout = 400;
+
 		if (nfds)
 			poll(pfd, nfds, timeout);
 		else
@@ -649,6 +653,8 @@ int cmd_run(void)
 
 		if (iv_ctl >= 0 && (pfd[iv_ctl].revents & POLLIN))
 			control_accept(listen_fd, spi, &p);
+
+		identify_tick();
 
 		// Drain everything queued before sleeping again.
 		do {

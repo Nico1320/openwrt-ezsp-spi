@@ -11,7 +11,7 @@ STOP=10
 BIN=/usr/sbin/ezsp-spi
 
 radio_args() {
-	local spidev gpiochip reset wake hostint nssel_int nssel_int_mode speed socket report_secs ezsp_version
+	local spidev gpiochip reset wake hostint nssel_int nssel_int_mode speed socket report_secs ezsp_version identify_led
 	local extra=""
 
 	config_load ezsp-spi
@@ -36,6 +36,9 @@ radio_args() {
 	config_get socket   radio socket   /var/run/ezsp-spi.sock
 	config_get report_secs radio report_secs 300
 	config_get ezsp_version radio ezsp_version 4
+	# Comma separated, so it survives the word splitting below.
+	config_get identify_led radio identify_led ""
+	[ -n "$identify_led" ] && extra="$extra --identify-led $identify_led"
 
 
 	echo "--spidev $spidev --chip $gpiochip" \
