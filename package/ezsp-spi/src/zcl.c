@@ -75,6 +75,7 @@ static char led_trigger[IDENTIFY_LEDS][32];
 static int led_bright[IDENTIFY_LEDS];
 static int led_n;
 static int led_on;
+static time_t identify_last;		// second boundary the countdown last saw
 
 static void led_write(const char *path, const char *what, const char *val)
 {
@@ -192,6 +193,7 @@ void identify_start(unsigned secs)
 		identify_led_claim();
 
 	identify_time = secs;
+	identify_last = time(NULL);	// or the first tick eats a second
 	printf("  identify for %u s\n", secs);
 	fflush(stdout);
 }
@@ -199,7 +201,6 @@ void identify_start(unsigned secs)
 // Called from the run loop about twice a second.
 void identify_tick(void)
 {
-	static time_t last;
 	time_t now = time(NULL);
 
 	if (!identify_time)
@@ -207,8 +208,8 @@ void identify_tick(void)
 
 	identify_led_toggle();
 
-	if (now != last) {
-		last = now;
+	if (now != identify_last) {
+		identify_last = now;
 		if (--identify_time == 0) {
 			identify_led_release();
 			printf("  identify done\n");
@@ -229,6 +230,29 @@ const char *zcl_location(void)
 		snprintf(host, sizeof(host), "openwrt");
 
 	return host;
+}
+
+// ZCL requires a Default Response to any command that has no response of its
+// own, unless the sender set the disable bit in its frame control. Without it
+// the caller waits out its timeout and reports the command as failed even
+// though it was carried out.
+void zcl_default_response(int spi, struct pins *p, uint16_t sender,
+			  uint16_t cluster, uint8_t in_fc, uint8_t seq,
+			  uint8_t cmd, uint8_t status)
+{
+	uint8_t r[8];
+	size_t n = 0;
+
+	if (in_fc & 0x10)			// disable default response
+		return;
+
+	r[n++] = 0x18;		// profile-wide, server->client, no default resp
+	r[n++] = seq;
+	r[n++] = 0x0B;		// Default Response
+	r[n++] = cmd;
+	r[n++] = status;
+
+	zcl_send(spi, p, sender, cluster, r, n);
 }
 
 // Endpoints must be registered before the stack comes up.
@@ -398,6 +422,8 @@ void zcl_handle_incoming(int spi, struct pins *p, const uint8_t *m,
 	if (cluster == ZCL_CLUSTER_IDENTIFY) {
 		// Cluster-specific commands.
 		if ((fc & 0x03) == 0x01) {
+			uint8_t status = 0x00;		// SUCCESS
+
 			if (cmd == ZCL_CMD_IDENTIFY && i + 1 < zlen) {
 				identify_start((unsigned)(zcl[i] |
 							  (zcl[i + 1] << 8)));
@@ -411,7 +437,14 @@ void zcl_handle_incoming(int spi, struct pins *p, const uint8_t *m,
 				resp[at++] = (uint8_t)(identify_time >> 8);
 				zcl_send(spi, p, sender, ZCL_CLUSTER_IDENTIFY,
 					 resp, at);
+				return;		// its own response; no default
+			} else {
+				status = 0x81;		// UNSUP_CLUSTER_COMMAND
 			}
+
+			zcl_default_response(spi, p, sender,
+					     ZCL_CLUSTER_IDENTIFY, fc, seq,
+					     cmd, status);
 			return;
 		}
 

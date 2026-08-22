@@ -249,6 +249,7 @@ extern const char zcl_manufacturer[];
 extern const char zcl_model[];
 extern const char zcl_swbuild[];
 unsigned report_interval(void);
+void zcl_default_response(int spi, struct pins *p, uint16_t sender, uint16_t cluster, uint8_t in_fc, uint8_t seq, uint8_t cmd, uint8_t status);
 void identify_start(unsigned secs);
 void identify_tick(void);
 int identify_active(void);
